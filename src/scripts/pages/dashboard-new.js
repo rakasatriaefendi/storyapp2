@@ -14,7 +14,8 @@ export default class DashboardPage {
         <div class="controls">
           <div class="search-sort-container">
             <div class="search-box">
-              <input type="text" id="search-input" placeholder="🔍 Cari cerita..." aria-label="Cari cerita" />
+              <label for="search-input">Cari cerita:</label>
+               <input type="text" id="search-input" placeholder="🔍 Cari cerita..." />
             </div>
             <div class="sort-box">
               <label for="sort-select">Urutkan:</label>
