@@ -214,21 +214,109 @@ export default class ComposePage {
           photoPreview.style.display = 'none';
           stopCamera();
           if (marker) map.removeLayer(marker);
+
+          // Send notification to service worker
+          if ('serviceWorker' in navigator && 'Notification' in window) {
+            navigator.serviceWorker.ready.then(registration => {
+              registration.active.postMessage({
+                type: 'STORY_SUCCESS',
+                payload: { description }
+              });
+            });
+          }
+        } else {
+          // If offline, queue the story for later sync
+          if (!navigator.onLine) {
+            const storyData = {
+              description,
+              lat,
+              lon,
+              photoBlob: {
+                dataUrl: await new Promise(resolve => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result);
+                  reader.readAsDataURL(photoFile);
+                }),
+                name: photoFile.name,
+                type: photoFile.type
+              }
+            };
+
+            // Queue for offline sync
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.ready.then(registration => {
+                registration.active.postMessage({
+                  type: 'QUEUE_OFFLINE_STORY',
+                  payload: storyData
+                });
+              });
+            }
+
+            Swal.fire({
+              icon: 'info',
+              title: 'Cerita disimpan offline',
+              text: 'Cerita akan dikirim otomatis saat koneksi kembali.',
+              confirmButtonColor: '#2563eb',
+            });
+            form.reset();
+            photoPreview.style.display = 'none';
+            stopCamera();
+            if (marker) map.removeLayer(marker);
+          } else {
+            Swal.fire({
+              icon: 'error',
+              title: 'Gagal mengirim cerita',
+              text: result.message,
+              confirmButtonColor: '#dc2626',
+            });
+          }
+        }
+      } catch (err) {
+        // If offline, queue the story for later sync
+        if (!navigator.onLine) {
+          const storyData = {
+            description,
+            lat,
+            lon,
+            photoBlob: {
+              dataUrl: await new Promise(resolve => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.readAsDataURL(photoFile);
+              }),
+              name: photoFile.name,
+              type: photoFile.type
+            }
+          };
+
+          // Queue for offline sync
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready.then(registration => {
+              registration.active.postMessage({
+                type: 'QUEUE_OFFLINE_STORY',
+                payload: storyData
+              });
+            });
+          }
+
+          Swal.fire({
+            icon: 'info',
+            title: 'Cerita disimpan offline',
+            text: 'Cerita akan dikirim otomatis saat koneksi kembali.',
+            confirmButtonColor: '#2563eb',
+          });
+          form.reset();
+          photoPreview.style.display = 'none';
+          stopCamera();
+          if (marker) map.removeLayer(marker);
         } else {
           Swal.fire({
             icon: 'error',
-            title: 'Gagal mengirim cerita',
-            text: result.message,
+            title: 'Terjadi Kesalahan',
+            text: err.message,
             confirmButtonColor: '#dc2626',
           });
         }
-      } catch (err) {
-        Swal.fire({
-          icon: 'error',
-          title: 'Terjadi Kesalahan',
-          text: err.message,
-          confirmButtonColor: '#dc2626',
-        });
       }
     });
   }

@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import { fetchStories } from '../api/api.js';
-import { PushHelper } from '../utils/sw-push.js';
+// PushHelper functionality moved to service worker
 import { favoritesDB } from '../utils/favorites-db.js';
 import CONFIG from '../config.js';
 
@@ -596,7 +596,7 @@ export default class DashboardPage {
       const sub = await reg.pushManager.getSubscription();
       notifSwitch.checked = !!sub;
       sidebarNotifSwitch.checked = !!sub;
-      
+
       // Sync both switches
       const handleNotifToggle = async (isChecked, sourceSwitch) => {
         if (isChecked) {
@@ -604,25 +604,42 @@ export default class DashboardPage {
             await PushHelper.subscribeUser(reg);
             notifSwitch.checked = true;
             sidebarNotifSwitch.checked = true;
-            alert('Push Notification diaktifkan!');
+            Swal.fire({
+              icon: 'success',
+              title: 'Notifikasi Diaktifkan',
+              text: 'Anda akan menerima pemberitahuan push.',
+              timer: 2000,
+              showConfirmButton: false,
+            });
           } catch (err) {
             console.error(err);
             notifSwitch.checked = false;
             sidebarNotifSwitch.checked = false;
-            alert('Gagal mengaktifkan notifikasi.');
+            Swal.fire({
+              icon: 'error',
+              title: 'Gagal Mengaktifkan Notifikasi',
+              text: 'Silakan coba lagi atau periksa pengaturan browser.',
+              confirmButtonColor: '#dc2626',
+            });
           }
         } else {
           await PushHelper.unsubscribeUser(reg);
           notifSwitch.checked = false;
           sidebarNotifSwitch.checked = false;
-          alert('Push Notification dimatikan.');
+          Swal.fire({
+            icon: 'info',
+            title: 'Notifikasi Dimatikan',
+            text: 'Anda tidak akan menerima pemberitahuan push.',
+            timer: 2000,
+            showConfirmButton: false,
+          });
         }
       };
-      
+
       notifSwitch.addEventListener('change', async () => {
         await handleNotifToggle(notifSwitch.checked, 'main');
       });
-      
+
       sidebarNotifSwitch.addEventListener('change', async () => {
         await handleNotifToggle(sidebarNotifSwitch.checked, 'sidebar');
       });

@@ -8,9 +8,11 @@ const FILES_TO_CACHE = [
   '/styles.css',
   '/manifest.json',
   '/offline.html',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png',
-  '/scripts/index.js',
+  '/icons/android-chrome-192x192.png',
+  '/icons/android-chrome-512x512.png',
+  '/screenshots/screenshoot-dashboard.png',
+  '/screenshots/screenshoot-upload.png',
+  '/screenshots/screenshoot-dekstop.png',
 ];
 
 // IndexedDB
@@ -55,11 +57,32 @@ async function deleteOutbox(id) {
   });
 }
 
+// Utility functions for push notifications
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 // INSTALL
 self.addEventListener('install', (evt) => {
   console.log('Service Worker installed');
   evt.waitUntil(
-    caches.open(CACHE_NAME).then((c) => c.addAll(FILES_TO_CACHE)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(async (cache) => {
+      try {
+        await cache.addAll(FILES_TO_CACHE);
+        console.log('All files cached successfully');
+      } catch (error) {
+        console.warn('Some files failed to cache, but continuing:', error);
+        // Continue even if some files fail to cache
+      }
+      return self.skipWaiting();
+    })
   );
 });
 
@@ -101,12 +124,17 @@ self.addEventListener('fetch', (evt) => {
 
   // navigation & assets => cache first then network
   evt.respondWith(
-    caches.match(evt.request).then(cached => cached || fetch(evt.request).catch(async () => {
-      if (evt.request.mode === 'navigate' || (evt.request.headers.get('accept')?.includes('text/html'))) {
-        return caches.match('/offline.html');
-      }
-      return new Response('', { status: 404 });
-    }))
+    caches.match(evt.request).then(cached => {
+      if (cached) return cached;
+
+      return fetch(evt.request).catch(async () => {
+        if (evt.request.mode === 'navigate' || (evt.request.headers.get('accept')?.includes('text/html'))) {
+          // For SPA, serve index.html for all routes so app can load offline
+          return caches.match('/index.html') || caches.match('/offline.html');
+        }
+        return new Response('', { status: 404 });
+      });
+    })
   );
 });
 
@@ -124,8 +152,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Story App';
   const options = {
     body: payload.body || 'Ada pembaruan cerita baru.',
-    icon: payload.icon || '/icons/icon-192x192.png',
-    badge: payload.badge || '/icons/icon-192x192.png',
+    icon: payload.icon || '/icons/android-chrome-192x192.png',
+    badge: payload.badge || '/icons/android-chrome-192x192.png',
     data: payload.url || '/#/',
     actions: payload.actions || [{ action: 'open', title: 'Lihat' }],
   };
@@ -148,7 +176,7 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// message: menerima perintah dari page (QUEUE_OFFLINE_STORY)
+// message: menerima perintah dari page (QUEUE_OFFLINE_STORY, STORY_SUCCESS, SUBSCRIBE_PUSH, UNSUBSCRIBE_PUSH)
 self.addEventListener('message', (evt) => {
   const { type, payload } = evt.data || {};
   if (type === 'QUEUE_OFFLINE_STORY') {
@@ -156,6 +184,23 @@ self.addEventListener('message', (evt) => {
   }
   if (type === 'SYNC_OUTBOX') {
     evt.waitUntil(syncOutbox());
+  }
+  if (type === 'STORY_SUCCESS') {
+    // Show success notification
+    const title = 'Story berhasil dibuat';
+    const options = {
+      body: `Anda telah membuat story baru dengan deskripsi: ${payload.description}`,
+      icon: '/icons/android-chrome-192x192.png',
+      badge: '/icons/android-chrome-192x192.png',
+      tag: 'story-success'
+    };
+    self.registration.showNotification(title, options);
+  }
+  if (type === 'SUBSCRIBE_PUSH') {
+    evt.waitUntil(subscribePush(payload));
+  }
+  if (type === 'UNSUBSCRIBE_PUSH') {
+    evt.waitUntil(unsubscribePush(payload));
   }
 });
 
@@ -189,3 +234,94 @@ async function syncOutbox() {
 self.addEventListener('sync', (event) => {
   if (event.tag === 'story-sync') event.waitUntil(syncOutbox());
 });
+
+// Push notification subscription functions
+async function subscribePush(payload) {
+  try {
+    const { token, vapidKey } = payload;
+    const subscription = await self.registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
+    });
+
+    const subscriptionPayload = {
+      endpoint: subscription.endpoint,
+      keys: {
+        p256dh: subscription.keys?.p256dh,
+        auth: subscription.keys?.auth,
+      },
+    };
+
+    const res = await fetch('https://story-api.dicoding.dev/v1/notifications/subscribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(subscriptionPayload),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Subscribe failed: ${res.status}`);
+    }
+
+    // Send success message back to client
+    self.clients.matchAll().then(clients => {
+      clients.forEach(client => {
+        client.postMessage({ type: 'PUSH_SUBSCRIBE_SUCCESS' });
+      });
+    });
+  } catch (err) {
+    console.error('Push subscribe failed:', err);
+    self.clients.matchAll().then(clients => {
+      clients.forEach(client => {
+        client.postMessage({ type: 'PUSH_SUBSCRIBE_ERROR', error: err.message });
+      });
+    });
+  }
+}
+
+async function unsubscribePush(payload) {
+  try {
+    const { token } = payload;
+    const subscription = await self.registration.pushManager.getSubscription();
+    if (!subscription) {
+      self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+          client.postMessage({ type: 'PUSH_UNSUBSCRIBE_SUCCESS' });
+        });
+      });
+      return;
+    }
+
+    const endpoint = subscription.endpoint;
+    const res = await fetch('https://story-api.dicoding.dev/v1/notifications/subscribe', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ endpoint }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Unsubscribe failed: ${res.status}`);
+    }
+
+    await subscription.unsubscribe();
+
+    // Send success message back to client
+    self.clients.matchAll().then(clients => {
+      clients.forEach(client => {
+        client.postMessage({ type: 'PUSH_UNSUBSCRIBE_SUCCESS' });
+      });
+    });
+  } catch (err) {
+    console.error('Push unsubscribe failed:', err);
+    self.clients.matchAll().then(clients => {
+      clients.forEach(client => {
+        client.postMessage({ type: 'PUSH_UNSUBSCRIBE_ERROR', error: err.message });
+      });
+    });
+  }
+}

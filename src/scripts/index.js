@@ -69,15 +69,16 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('load', handleRouteChange);
   })();
 
-  // === Service Worker ===
+  // Register service worker
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', async () => {
-      try {
-        const reg = await navigator.serviceWorker.register('/sw.js');
-        console.log('Service Worker registered:', reg);
-      } catch (err) {
-        console.error('Service Worker registration failed:', err);
-      }
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(registration => {
+          console.log('SW registered: ', registration);
+        })
+        .catch(registrationError => {
+          console.log('SW registration failed: ', registrationError);
+        });
     });
   }
 });
