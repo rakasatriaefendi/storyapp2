@@ -639,6 +639,15 @@ export default class DashboardPage {
       const handleNotifToggle = async (isChecked) => {
         if (isChecked) {
           try {
+            // Request notification permission first
+            if (!('Notification' in window)) {
+              throw new Error('Browser tidak mendukung notifikasi');
+            }
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+              throw new Error('Izin notifikasi tidak diberikan');
+            }
+
             // Get token and VAPID key from config
             const token = localStorage.getItem('bt_token');
             const vapidKey = SETTINGS.VAPID_PUBLIC_KEY;
@@ -660,7 +669,7 @@ export default class DashboardPage {
             Swal.fire({
               icon: 'error',
               title: 'Gagal Mengaktifkan Notifikasi',
-              text: 'Silakan coba lagi atau periksa pengaturan browser.',
+              text: err.message || 'Silakan coba lagi atau periksa pengaturan browser.',
               confirmButtonColor: '#dc2626',
             });
           }
